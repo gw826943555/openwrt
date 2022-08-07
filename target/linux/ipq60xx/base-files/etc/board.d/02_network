@@ -1,0 +1,17 @@
+. /lib/functions/uci-defaults.sh
+. /lib/functions/system.sh
+
+setup_network()
+{
+	case $(board_name) in
+	*)
+		ucidef_set_interface_lan "eth0"
+		;;
+	esac
+}
+
+board_config_update
+setup_network
+board_config_flush
+
+exit 0

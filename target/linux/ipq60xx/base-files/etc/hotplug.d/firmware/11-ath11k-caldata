@@ -1,0 +1,15 @@
+#!/bin/sh
+
+[ -e /lib/firmware/$FIRMWARE ] && exit 0
+
+. /lib/functions/caldata.sh
+
+case "$FIRMWARE" in
+"ath11k/IPQ6018/hw1.0/cal-ahb-c000000.wifi.bin")
+	case $(board_name) in
+	*)
+		caldata_die "Don't know how to read caldata for $(board_name)"
+                ;;
+	esac
+	;;
+esac
