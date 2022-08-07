@@ -3,7 +3,15 @@
 
 setup_network()
 {
+	local macaddr
+
 	case $(board_name) in
+	tplink,eap610-outdoor)
+		# /tmp/factory_data should be mounted by preinit
+		macaddr=$(get_mac_binary /tmp/factory_data/default-mac 0)
+		ucidef_set_interface_macaddr "lan" "$macaddr"
+		ucidef_set_interface_lan "eth0"
+		;;
 	*)
 		ucidef_set_interface_lan "eth0"
 		;;
