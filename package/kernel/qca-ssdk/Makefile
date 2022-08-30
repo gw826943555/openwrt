@@ -19,7 +19,7 @@ define KernelPackage/qca-ssdk
   CATEGORY:=Kernel modules
   SUBMENU:=Network Devices
   TITLE:=Qualcom SSDK switch driver
-  DEPENDS:=@(TARGET_ipq807x)
+  DEPENDS:=@(TARGET_ipq807x||TARGET_ipq60xx)
   FILES:=$(PKG_BUILD_DIR)/build/bin/qca-ssdk.ko
   AUTOLOAD:=$(call AutoLoad,30,qca-ssdk)
 endef
@@ -50,6 +50,8 @@ MAKE_FLAGS+= \
 
 ifeq ($(CONFIG_TARGET_BOARD), "ipq807x")
     MAKE_FLAGS+= CHIP_TYPE=HPPE PTP_FEATURE=disable SWCONFIG_FEATURE=disable
+else ifeq ($(CONFIG_TARGET_BOARD), "ipq60xx")
+    MAKE_FLAGS+= CHIP_TYPE=CPPE PTP_FEATURE=disable SWCONFIG_FEATURE=disable
 endif
 
 define Build/InstallDev
