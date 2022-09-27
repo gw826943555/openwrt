@@ -33,8 +33,12 @@ TARGET_DEVICES += cp01-c1
 
 define Device/eap610-outdoor
 	$(call Device/FitImage)
+	$(call Device/UbiFit)
 	DEVICE_VENDOR := TP-Link
 	DEVICE_MODEL := EAP610-Outdoor
+	BLOCKSIZE := 128k
+	PAGESIZE := 2048
 	SOC := ipq6018
+	IMAGE/nand-factory.ubi := append-ubi | qsdk-ipq-factory-nand
 endef
 TARGET_DEVICES += eap610-outdoor
