@@ -23,6 +23,7 @@
 
 	chosen {
 		stdout-path = "serial0:115200n8";
+		bootargs-append = " ubi.block=0,rootfs root=/dev/ubiblock0_0";
 	};
 
 	keys {
