@@ -23,6 +23,19 @@ define Device/UbiFit
 	IMAGE/nand-sysupgrade.bin := sysupgrade-tar | append-metadata
 endef
 
+define Device/cmiot_ax18
+	$(call Device/FitImage)
+	$(call Device/UbiFit)
+	DEVICE_VENDOR := CMIOT
+	DEVICE_MODEL := AX18
+	BLOCKSIZE := 128k
+	PAGESIZE := 2048
+	DEVICE_DTS_CONFIG := config@cp03-c1
+	SOC := ipq6018
+	DEVICE_PACKAGES := kmod-usb3 kmod-usb-dwc3 kmod-usb-dwc3-qcom
+endef
+TARGET_DEVICES += cmiot_ax18
+
 define Device/cp01-c1
 	$(call Device/FitImage)
 	DEVICE_VENDOR := Test
@@ -54,3 +67,16 @@ define Device/linksys_mr7350
 		kmod-usb3 kmod-usb-dwc3 kmod-usb-dwc3-qcom
 endef
 TARGET_DEVICES += linksys_mr7350
+
+define Device/zn_m2
+	$(call Device/FitImage)
+	$(call Device/UbiFit)
+	DEVICE_VENDOR := ZN
+	DEVICE_MODEL := M2
+	BLOCKSIZE := 128k
+	PAGESIZE := 2048
+	DEVICE_DTS_CONFIG := config@cp03-c1
+	SOC := ipq6018
+	DEVICE_PACKAGES := kmod-usb3 kmod-usb-dwc3 kmod-usb-dwc3-qcom
+endef
+TARGET_DEVICES += zn_m2

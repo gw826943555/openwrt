@@ -91,6 +91,10 @@ platform_do_upgrade() {
 	linksys,mr7350)
 		linksys_do_upgrade "$1"
 		;;
+	cmiot,ax18|\
+	zn,m2)
+		nand_do_upgrade "$1"
+		;;
 	*)
 		default_do_upgrade "$1"
 		;;
