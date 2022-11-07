@@ -236,10 +236,14 @@
 	};
 };
 
-&qusb_phy_1 {
+&qusb_phy_0 {
 	status = "okay";
 };
 
-&usb2 {
+&ssphy_0 {
+	status = "okay";
+};
+
+&usb3 {
 	status = "okay";
 };
