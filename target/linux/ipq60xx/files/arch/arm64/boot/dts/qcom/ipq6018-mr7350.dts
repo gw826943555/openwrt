@@ -235,3 +235,11 @@
 		};
 	};
 };
+
+&qusb_phy_1 {
+	status = "okay";
+};
+
+&usb2 {
+	status = "okay";
+};
