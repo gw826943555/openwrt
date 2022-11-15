@@ -71,6 +71,15 @@
 			bias-pull-up;
 		};
 	};
+
+	usb_power_pins: usb_power_pins {
+		mux {
+			pins = "gpio61";
+			function = "gpio";
+			bias-disable;
+			output-low;
+		};
+	};
 };
 
 &soc {
@@ -245,5 +254,7 @@
 };
 
 &usb3 {
+	pinctrl-0 = <&usb_power_pins>;
+	pinctrl-names = "default";
 	status = "okay";
 };
