@@ -6,6 +6,6 @@ case "$FIRMWARE" in
 "ath11k/IPQ6018/hw1.0/board-2.bin")
 	BOARD_DATA="ath11k/IPQ6018/hw1.0/$(board_name)-board-2.bin"
 	if [ -e "/lib/firmware/$BOARD_DATA" ]; then
-		cp "/lib/firmware/$BOARD_DATA" "/lib/firmware/$FIRMWARE"
+		ln -s "/lib/firmware/$BOARD_DATA" "/lib/firmware/$FIRMWARE"
 	fi
 esac
