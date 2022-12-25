@@ -39,7 +39,6 @@ define Device/eap610-outdoor
 	BLOCKSIZE := 128k
 	PAGESIZE := 2048
 	SOC := ipq6018
-	IMAGE/nand-factory.ubi := append-ubi | qsdk-ipq-factory-nand
 endef
 TARGET_DEVICES += eap610-outdoor
 
