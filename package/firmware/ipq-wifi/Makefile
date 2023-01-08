@@ -27,6 +27,7 @@ endef
 ALLWIFIBOARDS:= \
 	aruba_ap-365 \
 	devolo_magic-2-wifi-next \
+  eap610-outdoor \
 	edgecore_ecw5410 \
 	edgecore_oap100 \
 	extreme-networks_ws-ap3915i \
@@ -34,6 +35,7 @@ ALLWIFIBOARDS:= \
 	glinet_gl-ap1300 \
 	glinet_gl-s1300 \
 	linksys_ea8300 \
+  linksys_mr7350 \
 	p2w_r619ac \
 	pakedge_wr-1 \
 	qxwlan_e2600ac-c1 \
@@ -48,13 +50,18 @@ define Package/ipq-wifi-default
   SUBMENU:=ath10k Board-Specific Overrides
   SECTION:=firmware
   CATEGORY:=Firmware
-  DEPENDS:=@(TARGET_ipq40xx||TARGET_ipq806x)
+  DEPENDS:=@(TARGET_ipq40xx||TARGET_ipq60xx||TARGET_ipq806x)
   TITLE:=Custom Board
 endef
 
 define ipq-wifi-install-one-to
   $(INSTALL_DIR)  $(2)/lib/firmware/ath10k/$(3)/
   $(INSTALL_DATA) $(1) $(2)/lib/firmware/ath10k/$(3)/board-2.bin
+endef
+
+define ipq-wifi-install-ath11-one-to
+  $(INSTALL_DIR)  $(2)/lib/firmware/ath11k/$(3)/
+  $(INSTALL_DATA) $(1) $(2)/lib/firmware/ath11k/$(3)/board-2.bin
 endef
 
 define ipq-wifi-install-one
@@ -64,8 +71,10 @@ define ipq-wifi-install-one
     $(call ipq-wifi-install-one-to,$(1),$(2),QCA9888/hw2.0),\
   $(if $(filter $(suffix $(1)),.QCA9984 .qca9984),\
     $(call ipq-wifi-install-one-to,$(1),$(2),QCA9984/hw1.0),\
-    $(error Unrecognized board-file suffix '$(suffix $(1))' for '$(1)')\
-  )))
+  $(if $(filter $(suffix $(1)),.IPQ6018 .ipq6018),\
+		$(call ipq-wifi-install-ath11-one-to,$(1),$(2),IPQ6018/hw1.0),\
+		$(error Unrecognized board-file suffix '$(suffix $(1))' for '$(1)')\
+  ))))
 
 endef
 # Blank line required at end of above define due to foreach context
@@ -103,6 +112,7 @@ endef
 
 $(eval $(call generate-ipq-wifi-package,aruba_ap-365,Aruba AP-365))
 $(eval $(call generate-ipq-wifi-package,devolo_magic-2-wifi-next,devolo Magic 2 WiFi next))
+$(eval $(call generate-ipq-wifi-package,eap610-outdoor,TP-Link EAP610-Outdoor))
 $(eval $(call generate-ipq-wifi-package,edgecore_ecw5410,Edgecore ECW5410))
 $(eval $(call generate-ipq-wifi-package,edgecore_oap100,Edgecore OAP100))
 $(eval $(call generate-ipq-wifi-package,extreme-networks_ws-ap3915i,Edgecore OAP100))
@@ -110,6 +120,7 @@ $(eval $(call generate-ipq-wifi-package,glinet_gl-a1300,GL.iNet GL-A1300))
 $(eval $(call generate-ipq-wifi-package,glinet_gl-ap1300,GL.iNet GL-AP1300))
 $(eval $(call generate-ipq-wifi-package,glinet_gl-s1300,GL.iNet GL-S1300))
 $(eval $(call generate-ipq-wifi-package,linksys_ea8300,Linksys EA8300))
+$(eval $(call generate-ipq-wifi-package,linksys_mr7350,Linksys MR7350))
 $(eval $(call generate-ipq-wifi-package,p2w_r619ac,P&W R619AC))
 $(eval $(call generate-ipq-wifi-package,pakedge_wr-1,Pakedge WR-1))
 $(eval $(call generate-ipq-wifi-package,qxwlan_e2600ac-c1,Qxwlan E2600AC C1))
