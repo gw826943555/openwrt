@@ -1,0 +1,50 @@
+#
+# This is free software, lisence use MIT.
+# 
+# Copyright (C) 2020 Willliam <gw8269543555@qq.com>
+#
+
+name: Sync Code from upstream OpenWrt
+
+# Add a button to trigger the workflow - Kuroko
+on: 
+  repository_dispatch:
+  workflow_dispatch:
+  
+#  push:
+#    branches: 
+#      - master
+
+  schedule:
+    - cron: 0 19 * * *
+
+jobs:
+
+  merge:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - name: Checkout
+      uses: actions/checkout@v2
+      with:
+        ref: main
+        fetch-depth: 0
+        lfs: true
+
+    - name: Syncing Preparation
+      run : |
+        git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git config --global user.name "github-actions[bot]"
+        
+    - name: Syncing Changes
+      run: |
+        git remote add upstream https://github.com/openwrt/openwrt.git
+        git fetch upstream main
+        git rebase upstream/main
+        
+    - name: Update Origin
+      env:
+        DOWNSTREAM_BRANCH: main
+      run: git push -f origin $DOWNSTREAM_BRANCH
