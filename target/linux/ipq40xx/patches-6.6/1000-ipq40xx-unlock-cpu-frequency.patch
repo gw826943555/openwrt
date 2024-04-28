@@ -9,8 +9,8 @@ unlock 896Mhz CPU operating points.
 Signed-off-by: William <gw826943555@qq.com>
 ---
 
---- a/arch/arm/boot/dts/qcom-ipq4019.dtsi
-+++ b/arch/arm/boot/dts/qcom-ipq4019.dtsi
+--- a/arch/arm/boot/dts/qcom/qcom-ipq4019.dtsi
++++ b/arch/arm/boot/dts/qcom/qcom-ipq4019.dtsi
 @@ -114,20 +114,24 @@
 
  		opp-48000000 {
@@ -42,7 +42,7 @@ Signed-off-by: William <gw826943555@qq.com>
  	memory {
 --- a/drivers/clk/qcom/gcc-ipq4019.c
 +++ b/drivers/clk/qcom/gcc-ipq4019.c
-@@ -579,6 +579,9 @@ static const struct freq_tbl ftbl_gcc_ap
+@@ -888,6 +888,9 @@ static const struct freq_tbl ftbl_gcc_ap
  	F(632000000, P_DDRPLLAPSS, 1, 0, 0),
  	F(672000000, P_DDRPLLAPSS, 1, 0, 0),
  	F(716000000, P_DDRPLLAPSS, 1, 0, 0),
