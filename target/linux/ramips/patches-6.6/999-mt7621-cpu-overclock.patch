@@ -1,0 +1,31 @@
+--- a/drivers/clk/ralink/clk-mt7621.c
++++ b/drivers/clk/ralink/clk-mt7621.c
+@@ -250,7 +250,7 @@ static unsigned long mt7621_cpu_recalc_r
+ 	struct regmap *sysc = clk->priv->sysc;
+ 	struct regmap *memc = clk->priv->memc;
+ 	u32 clkcfg, clk_sel, curclk, ffiv, ffrac;
+-	u32 pll, prediv, fbdiv;
++	u32 pll, prediv, fbdiv, i;
+ 	unsigned long cpu_clk;
+ 
+ 	regmap_read(sysc, SYSC_REG_CLKCFG0, &clkcfg);
+@@ -266,6 +266,10 @@ static unsigned long mt7621_cpu_recalc_r
+ 		break;
+ 	case 1:
+ 		regmap_read(memc, MEMC_REG_CPU_PLL, &pll);
++		pll &= ~(0x7ff);
++		pll |=  (0x362);
++		regmap_write(memc, MEMC_REG_CPU_PLL, pll);
++		for(i=0;i<1024;i++);
+ 		fbdiv = FIELD_GET(CPU_PLL_FBDIV_MASK, pll);
+ 		prediv = FIELD_GET(CPU_PLL_PREDIV_MASK, pll);
+ 		cpu_clk = ((fbdiv + 1) * xtal_clk) >> prediv_tbl[prediv];
+@@ -274,6 +278,8 @@ static unsigned long mt7621_cpu_recalc_r
+ 		cpu_clk = xtal_clk;
+ 	}
+ 
++	pr_info("CPU Clock: %ldMHz\n", cpu_clk / 1000000);
++
+ 	return cpu_clk / ffiv * ffrac;
+ }
+ 
