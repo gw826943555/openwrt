@@ -1,0 +1,347 @@
+// SPDX-License-Identifier: GPL-2.0-or-later OR MIT
+/*
+ * Copyright (C) 2023 Tianling Shen <cnsztl@immortalwrt.org>
+ */
+
+/dts-v1/;
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+#include <dt-bindings/leds/common.h>
+
+#include "mt7981.dtsi"
+
+/ {
+	model = "Mediatek 7981R128";
+	compatible = "mediatek,7981r128", "mediatek,mt7981";
+
+	aliases {
+		led-boot = &green_led;
+		led-failsafe = &green_led;
+		led-running = &green_led;
+		led-upgrade = &green_led;
+		serial0 = &uart0;
+	};
+
+	chosen: chosen {
+		rootdisk = <&ubi_rootdisk>;
+		stdout-path = "serial0:115200n8";
+	};
+
+	memory {
+		reg = <0 0x40000000 0 0x20000000>;
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		button-reset {
+			label = "reset";
+			linux,code = <KEY_RESTART>;
+			gpios = <&pio 1 GPIO_ACTIVE_LOW>;
+		};
+	};
+
+	gpio-leds {
+		compatible = "gpio-leds";
+
+		led-0 {
+			function = LED_FUNCTION_WAN;
+			color = <LED_COLOR_ID_GREEN>;
+			gpios = <&pio 4 GPIO_ACTIVE_LOW>;
+		};
+
+		led-1 {
+			function = LED_FUNCTION_WLAN_5GHZ;
+			color = <LED_COLOR_ID_GREEN>;
+			gpios = <&pio 5 GPIO_ACTIVE_LOW>;
+		};
+
+		led-2 {
+			function = LED_FUNCTION_WLAN_2GHZ;
+			color = <LED_COLOR_ID_GREEN>;
+			gpios = <&pio 6 GPIO_ACTIVE_LOW>;
+		};
+
+		led-3 {
+			function = LED_FUNCTION_LAN;
+			color = <LED_COLOR_ID_GREEN>;
+			gpios = <&pio 8 GPIO_ACTIVE_LOW>;
+		};
+
+		green_led: led-4 {
+			function = LED_FUNCTION_POWER;
+			color = <LED_COLOR_ID_GREEN>;
+			gpios = <&pio 13 GPIO_ACTIVE_LOW>;
+		};
+	};
+
+	/* SFP1 cage (WAN) */
+	i2c_sfp1: i2c-gpio-0 {
+		compatible = "i2c-gpio";
+		sda-gpios = <&pio 9 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&pio 10 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <2>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+	};
+
+	sfp1: sfp1 {
+		compatible = "sff,sfp";
+		i2c-bus = <&i2c_sfp1>;
+		los-gpios = <&pio 3 GPIO_ACTIVE_HIGH>;
+		mod-def0-gpios = <&pio 35 GPIO_ACTIVE_LOW>;
+		/*rate-select0-gpios = <&pio 9 GPIO_ACTIVE_HIGH>;
+		rate-select1-gpios = <&pio 28 GPIO_ACTIVE_HIGH>;*/
+		tx-disable-gpios = <&pio 12 GPIO_ACTIVE_HIGH>;
+		tx-fault-gpios = <&pio 34 GPIO_ACTIVE_HIGH>;
+		maximum-power-milliwatt = <3000>;
+	};
+};
+
+&eth {
+	status = "okay";
+
+	gmac0: mac@0 {
+		compatible = "mediatek,eth-mac";
+		reg = <0>;
+		phy-mode = "2500base-x";
+
+		nvmem-cells = <&macaddr_factory_4 0>;
+		nvmem-cell-names = "mac-address";
+
+		fixed-link {
+			speed = <2500>;
+			full-duplex;
+			pause;
+		};
+	};
+
+	gmac1: mac@1 {
+		compatible = "mediatek,eth-mac";
+		reg = <1>;
+		phy-mode = "2500base-x";
+		managed = "in-band-status";
+		sfp = <&sfp1>;
+
+		nvmem-cells = <&macaddr_factory_4 1>;
+		nvmem-cell-names = "mac-address";
+	};
+};
+
+&mdio_bus {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	phy5: phy@5 {
+		compatible = "ethernet-phy-id67c9.de0a";
+		reg = <5>;
+		reset-deassert-us = <20000>;
+		reset-assert-us = <600>;
+		reset-gpios = <&pio 7 GPIO_ACTIVE_LOW>;
+	};
+
+	switch: switch@1f {
+        compatible = "mediatek,mt7531";
+		reg = <31>;
+		reset-gpios = <&pio 39 GPIO_ACTIVE_HIGH>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@1 {
+				reg = <1>;
+				label = "lan1";
+			};
+
+			port@5 {
+				reg = <5>;
+				label = "lan2";
+				phy-mode = "2500base-x";
+				phy-handle = <&phy5>;
+			};
+
+			port@6 {
+				reg = <6>;
+				label = "cpu";
+				ethernet = <&gmac0>;
+				phy-mode = "2500base-x";
+
+				fixed-link {
+					speed = <2500>;
+					full-duplex;
+					pause;
+				};
+			};
+		};
+	};
+};
+
+&spi0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&spi0_flash_pins>;
+	status = "okay";
+
+	spi_nand@0 {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		compatible = "spi-nand";
+		reg = <0>;
+
+		spi-max-frequency = <52000000>;
+		spi-tx-bus-width = <4>;
+		spi-rx-bus-width = <4>;
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			partition@0 {
+				label = "bl2";
+				reg = <0x0 0x100000>;
+				read-only;
+			};
+
+			partition@100000 {
+				label = "u-boot-env";
+				reg = <0x100000 0x80000>;
+			};
+
+			partition@180000 {
+				label = "factory";
+				reg = <0x180000 0x200000>;
+				read-only;
+
+				nvmem-layout {
+					compatible = "fixed-layout";
+					#address-cells = <1>;
+					#size-cells = <1>;
+
+					eeprom_factory_0: eeprom@0 {
+						reg = <0x0 0x1000>;
+					};
+
+					macaddr_factory_4: macaddr@4 {
+						compatible = "mac-base";
+						reg = <0x4 0x6>;
+						#nvmem-cell-cells = <1>;
+					};
+				};
+			};
+
+			partition@380000 {
+				label = "fip";
+				reg = <0x380000 0x200000>;
+				read-only;
+			};
+
+			partition@580000 {
+				compatible = "linux,ubi";
+				label = "ubi";
+				reg = <0x580000 0x7200000>;
+
+				volumes {
+					ubi_rootdisk: ubi-volume-fit {
+						volname = "fit";
+					};
+				};
+			};
+		};
+	};
+};
+
+&spi1 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&spic_pins>;
+	status = "okay";
+
+	proslic_spi: proslic_spi@0 {
+		compatible = "silabs,proslic_spi";
+		reg = <0>;
+		spi-max-frequency = <10000000>;
+		spi-cpha = <1>;
+		spi-cpol = <1>;
+		channel_count = <1>;
+		debug_level = <4>;       /* 1 = TRC, 2 = DBG, 4 = ERR */
+		reset_gpio = <&pio 25 GPIO_ACTIVE_HIGH>;
+		ig,enable-spi = <1>;     /* 1: Enable, 0: Disable */
+	};
+};
+
+
+&uart0 {
+	status = "okay";
+};
+
+&usb_phy {
+	status = "okay";
+};
+
+&watchdog {
+	status = "okay";
+};
+
+&wifi {
+	nvmem-cells = <&eeprom_factory_0>;
+	nvmem-cell-names = "eeprom";
+	status = "okay";
+};
+
+&xhci {
+	status = "okay";
+};
+
+&pio {
+	i2c_pins_g0: i2c-pins-g0 {
+		mux {
+			function = "i2c";
+			groups = "i2c0_0";
+		};
+	};
+
+	pcm_pins: pcm-pins-g0 {
+		mux {
+			function = "pcm";
+			groups = "pcm";
+		};
+	};
+
+	spi0_flash_pins: spi0-pins {
+		mux {
+			function = "spi";
+			groups = "spi0", "spi0_wp_hold";
+		};
+
+		conf-pu {
+			pins = "SPI0_CS", "SPI0_HOLD", "SPI0_WP";
+			drive-strength = <8>;
+			mediatek,pull-up-adv = <0>; /* bias-disable */
+		};
+
+		conf-pd {
+			pins = "SPI0_CLK", "SPI0_MOSI", "SPI0_MISO";
+			drive-strength = <8>;
+			mediatek,pull-up-adv = <0>; /* bias-disable */
+		};
+	};
+
+	spic_pins: spi1-pins {
+		mux {
+			function = "spi";
+			groups = "spi1_1";
+		};
+	};
+};
+
+&afe {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pcm_pins>;
+	status = "okay";
+};
+
+&i2c0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c_pins_g0>;
+	status = "disabled";
+};
