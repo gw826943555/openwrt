@@ -152,6 +152,7 @@ case "$board" in
 		[ "$PHYNBR" = "0" ] && echo "$addr" > /sys${DEVPATH}/macaddress
 		[ "$PHYNBR" = "1" ] && macaddr_add $addr 1 > /sys${DEVPATH}/macaddress
 		;;
+	mediatek,7981r128|\
 	routerich,ax3000|\
 	zbtlink,zbt-z8102ax|\
 	zbtlink,zbt-z8103ax|\
