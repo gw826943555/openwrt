@@ -78,7 +78,6 @@
 					partition@0 {
 						label = "bl2";
 						reg = <0x00000 0x0100000>;
-						read-only;
 					};
 
 					partition@100000 {
