@@ -1,0 +1,27 @@
+--- a/arch/arm64/boot/dts/qcom/ipq5018.dtsi
++++ b/arch/arm64/boot/dts/qcom/ipq5018.dtsi
+@@ -94,8 +94,8 @@
+ 		compatible = "operating-points-v2";
+ 		opp-shared;
+ 
+-		opp-1008000000 {
+-			opp-hz = /bits/ 64 <1008000000>;
++		opp-1296000000 {
++			opp-hz = /bits/ 64 <1296000000>;
+ 			opp-microvolt = <1100000>;
+ 			clock-latency-ns = <200000>;
+ 		};
+--- a/drivers/clk/qcom/apss-ipq-pll.c
++++ b/drivers/clk/qcom/apss-ipq-pll.c
+@@ -66,9 +66,9 @@
+ 	},
+ };
+ 
+-/* 1.008 GHz configuration */
++/* 1.3 OC GHz configuration */
+ static const struct alpha_pll_config ipq5018_pll_config = {
+-	.l = 0x2a,
++	.l = 0x36,
+ 	.config_ctl_val = 0x4001075b,
+ 	.main_output_mask = BIT(0),
+ 	.aux_output_mask = BIT(1),
