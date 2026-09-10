@@ -1,0 +1,126 @@
+From: Loong <1031313955@qq.com>
+Subject: [PATCH] xg-040g-md: enable complete web recovery support
+
+Enable the web recovery server for XG-040G-MD, configure its factory volumes,
+add the automatic recovery path, identify the web U-Boot in the boot menu,
+and preserve rootfs data during FIP updates.
+diff --git a/configs/an7581_nokia_xg-040g-md_defconfig b/configs/an7581_nokia_xg-040g-md_defconfig
+--- a/configs/an7581_nokia_xg-040g-md_defconfig
++++ b/configs/an7581_nokia_xg-040g-md_defconfig
+@@ -20,6 +20,9 @@ CONFIG_LOGLEVEL=9
+ CONFIG_LOG=y
+ CONFIG_SYS_PBSIZE=1049
+ CONFIG_SYS_CONSOLE_IS_IN_ENV=y
++CONFIG_CONSOLE_RECORD=y
++CONFIG_CONSOLE_RECORD_OUT_SIZE=0x10000
++CONFIG_CONSOLE_RECORD_OUT_SIZE_F=0x800
+ # CONFIG_DISPLAY_BOARDINFO is not set
+ CONFIG_HUSH_PARSER=y
+ CONFIG_SYS_PROMPT="AN7581> "
+@@ -41,6 +44,12 @@ CONFIG_CMD_MTD_NAND_READ_TEST=y
+ CONFIG_CMD_MTD_NAND_WRITE_TEST=y
+ CONFIG_CMD_PART=y
+ CONFIG_CMD_TFTPSRV=y
++CONFIG_PROT_TCP=y
++CONFIG_CMD_HTTPD=y
++CONFIG_HTTPD_FACTORY_VOLS="ri:0x40000 bosa:0x40000"
++CONFIG_HTTPD_FACTORY_MAC="ri:0x3e"
++CONFIG_CMD_HTTPD_STOCK_RESTORE=y
++CONFIG_CYCLIC=y
+ CONFIG_CMD_RARP=y
+ CONFIG_CMD_CDP=y
+ CONFIG_CMD_SNTP=y
+--- a/defenvs/an7581_nokia_xg-040g-md_env
++++ b/defenvs/an7581_nokia_xg-040g-md_env
+@@ -26,28 +26,32 @@
+ boot_first=if button reset ; then led $bootled_status on ; run boot_default ; fi ; bootmenu
+ boot_default=run bootcmd ; run boot_tftp_forever
+ boot_production=led $bootled_status on ; run ubi_read_production && bootm $loadaddr#$bootconf ; led $bootled_status off
+-boot_ubi=run boot_production ; run boot_tftp_forever
++boot_ubi=run boot_production ; run web_uboot_boot_forever
+ boot_tftp_forever=led $bootled_status on ; while true ; do run boot_tftp ; sleep 1 ; done
++web_uboot_boot_forever=while true ; do httpd ; sleep 1 ; done
+ boot_tftp_production=tftpboot $loadaddr $bootfile_upg && env exists replacevol && iminfo $loadaddr && run ubi_write_production ; if env exists noboot ; then else bootm $loadaddr#$bootconf ; fi
+ boot_tftp_recovery=tftpboot $loadaddr $bootfile && env exists replacevol && iminfo $loadaddr && run ubi_write_recovery ; if env exists noboot ; then else bootm $loadaddr#$bootconf ; fi
+ boot_tftp=tftpboot $loadaddr $bootfile && bootm $loadaddr#$bootconf
+ boot_tftp_write_bl2=mw.b $loadaddr 0xff 0x800 ; setexpr loadaddr_bl2 $loadaddr + 0x800 ; tftpboot $loadaddr_bl2 $bootfile_bl2 && run mtd_write_bl2
+ boot_tftp_write_fip=tftpboot $loadaddr $bootfile_fip && run ubi_write_fip && run reset_factory
+ preboot=led $bootled_status on
+-check_buttons=if button reset ; then run boot_tftp ; fi
++check_buttons=if button reset ; then httpd ; fi
+ ethaddr_factory=ubi read 0x90000000 ri && env readmem -b ethaddr 0x9000003e 0x6 ; setenv ethaddr_factory
+ part_default=production
+ reset_factory=ubi part ubi ; mw $loadaddr 0x0 0x800 ; ubi write $loadaddr ubootenv 0x800 ; ubi write $loadaddr ubootenv2 0x800
+ mtd_write_bl2=mtd erase bl2 && mtd write bl2 $loadaddr
++web_uboot_write_bl2=mtd erase bl2 && mtd write bl2 $loadaddr 0x800 $filesize
+ ubi_create_board_data=ubi check bosa || ubi create bosa 0x40000 || run ubi_format ; ubi check ri || ubi create ri 0x40000 || run ubi_format
+ ubi_create_env=ubi check ubootenv || ubi create ubootenv 0x1f000 dynamic || run ubi_format ; ubi check ubootenv2 || ubi create ubootenv2 0x1f000 dynamic || run ubi_format
+ ubi_format=ubi detach ; mtd erase ubi && ubi part ubi ; reset
++web_uboot_format_ubi=ubi detach ; mtd erase ubi && ubi part ubi
+ ubi_prepare_rootfs=if ubi check rootfs_data ; then else if env exists rootfs_data_max ; then ubi create rootfs_data $rootfs_data_max dynamic || ubi create rootfs_data - dynamic ; else ubi create rootfs_data - dynamic ; fi ; fi
+ ubi_read_production=ubi read $loadaddr fit && iminfo $loadaddr && run ubi_prepare_rootfs
+ ubi_remove_rootfs=ubi check rootfs_data && ubi remove rootfs_data
+ ubi_write_fip=run ubi_remove_rootfs ; ubi check fip && ubi remove fip ; ubi create fip 0x100000 static && ubi write $loadaddr fip $filesize
+ ubi_write_production=ubi check fit && ubi remove fit ; run ubi_remove_rootfs ; ubi create fit $filesize dynamic && ubi write $loadaddr fit $filesize
+ _init_env=setenv _init_env ; run ubi_create_env ; saveenv ; saveenv ; run ubi_create_board_data
+-_firstboot=setenv _firstboot ; run ethaddr_factory ; run _switch_to_menu ; run _init_env ; run boot_first
++_firstboot=setenv _firstboot ; run check_buttons ; ubi part ubi || run web_uboot_no_ubi ; run ethaddr_factory ; run _switch_to_menu ; run _init_env ; run boot_first
++web_uboot_no_ubi=echo ; echo "This flash carries no usable UBI. Leaving it alone." ; echo "Web recovery starts in 3s at http://$ipaddr - press a key for the menu" ; setenv bootmenu_0 "Continue to web recovery at http://$ipaddr=run web_uboot_boot_forever" ; bootmenu 3 ; run web_uboot_boot_forever
+ _switch_to_menu=setenv _switch_to_menu ; setenv bootdelay 3 ; setenv bootmenu_delay 3 ; setenv bootmenu_0 $bootmenu_0d ; setenv bootmenu_0d ; run _bootmenu_update_title
+ _bootmenu_update_title=setenv _bootmenu_update_title ; setenv bootmenu_title "$bootmenu_title       [33m$ver[0m"
+diff --git a/configs/an7581_nokia_xg-040g-md_defconfig b/configs/an7581_nokia_xg-040g-md_defconfig
+--- a/configs/an7581_nokia_xg-040g-md_defconfig
++++ b/configs/an7581_nokia_xg-040g-md_defconfig
+@@ -29,6 +29,7 @@ CONFIG_SYS_MAXARGS=8
+ CONFIG_CMD_CPU=y
+ CONFIG_CMD_LICENSE=y
+ CONFIG_CMD_BOOTMENU=y
++CONFIG_EVENT=y
+ CONFIG_CMD_ASKENV=y
+ CONFIG_CMD_ERASEENV=y
+ CONFIG_CMD_ENV_FLAGS=y
+diff --git a/defenvs/an7581_nokia_xg-040g-md_env b/defenvs/an7581_nokia_xg-040g-md_env
+--- a/defenvs/an7581_nokia_xg-040g-md_env
++++ b/defenvs/an7581_nokia_xg-040g-md_env
+@@ -10,10 +10,11 @@ bootfile_bl2=immortalwrt-airoha-an7581-nokia_xg-040g-md-ubi-preloader.bin
+ bootfile_fip=immortalwrt-airoha-an7581-nokia_xg-040g-md-ubi-bl31-uboot.fip
+ bootfile_upg=immortalwrt-airoha-an7581-nokia_xg-040g-md-ubi-squashfs-sysupgrade.itb
+ bootled_status=green:power
++web_uboot_envver=7
+ bootmenu_confirm_return=askenv - Press ENTER to return to menu ; bootmenu 60
+ bootmenu_default=0
+ bootmenu_delay=0
+-bootmenu_title=      [0;34m( ( ( [1;39mOpenWrt[0;34m ) ) )
++bootmenu_title=      [1;39mAiroha Web U-Boot 0.3.0[0m
+ bootmenu_0=Initialize environment.=run _firstboot
+ bootmenu_0d=Run default boot command.=run boot_default
+ bootmenu_1=Boot system via TFTP=run boot_tftp ; run bootmenu_confirm_return
+@@ -23,6 +24,8 @@ bootmenu_4=[31mLoad BL31+U-Boot FIP via TFTP then write to NAND[0m=run boot_tf
+ bootmenu_5=[31mLoad BL2 preloader via TFTP then write to NAND[0m=run boot_tftp_write_bl2 ; run bootmenu_confirm_return
+ bootmenu_6=Reboot=reset
+ bootmenu_7=Reset all settings to factory defaults=run reset_factory ; reset
++bootmenu_8=[31mStart web recovery server[0m=httpd ; run bootmenu_confirm_return
++bootmenu_9=About - github.com/Loong1996/ImmortalWrt-Airoha=run web_uboot_show_about ; run bootmenu_confirm_return
+ boot_first=if button reset ; then led $bootled_status on ; run boot_default ; fi ; bootmenu
+ boot_default=run bootcmd ; run boot_tftp_forever
+ boot_production=led $bootled_status on ; run ubi_read_production && bootm $loadaddr#$bootconf ; led $bootled_status off
+@@ -36,7 +39,8 @@ boot_tftp_write_bl2=mw.b $loadaddr 0xff 0x800 ; setexpr loadaddr_bl2 $loadaddr +
+ boot_tftp_write_fip=tftpboot $loadaddr $bootfile_fip && run ubi_write_fip && run reset_factory
+ preboot=led $bootled_status on
+ check_buttons=if button reset ; then httpd ; fi
+-ethaddr_factory=ubi read 0x90000000 ri && env readmem -b ethaddr 0x9000003e 0x6 ; setenv ethaddr_factory
++web_uboot_show_about=echo ; echo Airoha Web U-Boot 0.3.0 by Loong ; echo Guide: https://loong1996.github.io/ImmortalWrt-Airoha/recovery-guide.html ; echo Project: https://github.com/Loong1996/ImmortalWrt-Airoha ; echo Author: https://github.com/Loong1996 ; echo
++ethaddr_factory=ubi read 0x90000000 ri && env readmem -b rimac 0x9000003e 0x6 ; if test "$rimac" = "ff:ff:ff:ff:ff:ff" ; then echo ri volume holds no factory MAC ; setenv rimac ; fi ; if test -n "$rimac" ; then setenv ethaddr "$rimac" ; fi ; setenv rimac ; setenv ethaddr_factory
+ part_default=production
+ reset_factory=ubi part ubi ; mw $loadaddr 0x0 0x800 ; ubi write $loadaddr ubootenv 0x800 ; ubi write $loadaddr ubootenv2 0x800
+ mtd_write_bl2=mtd erase bl2 && mtd write bl2 $loadaddr
+--- a/defenvs/an7581_nokia_xg-040g-md_env
++++ b/defenvs/an7581_nokia_xg-040g-md_env
+@@ -45,6 +45,7 @@
+ reset_factory=ubi part ubi ; mw $loadaddr 0x0 0x800 ; ubi write $loadaddr ubootenv 0x800 ; ubi write $loadaddr ubootenv2 0x800
+ mtd_write_bl2=mtd erase bl2 && mtd write bl2 $loadaddr
+ web_uboot_write_bl2=mtd erase bl2 && mtd write bl2 $loadaddr 0x800 $filesize
++web_uboot_write_fip=if ubi check fip ; then ubi write $loadaddr fip $filesize ; else run ubi_write_fip ; fi
+ ubi_create_board_data=ubi check bosa || ubi create bosa 0x40000 || run ubi_format ; ubi check ri || ubi create ri 0x40000 || run ubi_format
+ ubi_create_env=ubi check ubootenv || ubi create ubootenv 0x1f000 dynamic || run ubi_format ; ubi check ubootenv2 || ubi create ubootenv2 0x1f000 dynamic || run ubi_format
+ ubi_format=ubi detach ; mtd erase ubi && ubi part ubi ; reset

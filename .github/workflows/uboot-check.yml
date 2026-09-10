@@ -1,0 +1,339 @@
+name: Web U-Boot 检查
+
+# 救砖页和它背后的 net/httpd.c 是这个包里最容易悄悄坏掉的两样东西：
+#
+#   - 页面是一大段 JS，被 gen.py 转成 C 字符串塞进 net/httpd.c，编译器只看见
+#     字符串 —— 所以它靠 files/httpd/test/ 里的 jsdom 用例守着。
+#   - net/httpd.c 只在 CONFIG_CMD_HTTPD=y 时才编译，而整套固件要编 ~47 min，
+#     没人会为了看一眼语法去等它。于是就出现过连着五批 C 改动一次没编译的
+#     情况 —— 这条 workflow 就是为了让那种事不再发生。
+#
+# 三道便宜的（page 作业，~3 min）加一道贵的（compile 作业，两块板并行，各
+# ~6-9 min）。改动只碰 package/boot/uboot-airoha 时才跑。
+
+on:
+  push:
+    paths:
+      - 'package/boot/uboot-airoha/**'
+      - '.github/workflows/uboot-check.yml'
+  pull_request:
+    paths:
+      - 'package/boot/uboot-airoha/**'
+      - '.github/workflows/uboot-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uboot-check-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PKG: package/boot/uboot-airoha
+
+jobs:
+  page:
+    name: 页面与补丁
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout(检出)
+        uses: actions/checkout@v4
+
+      - name: Setup Node(装 Node)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # 用例自己会先跑 preview.py 现渲染出设备真正会发的那份 HTML，再在 jsdom
+      # 里驱动它；runner 自带 python3。test/.gitignore 忽略 package-lock.json，
+      # 所以只能 npm install，不能 npm ci。
+      - name: Page Cases(jsdom 跑救砖页用例)
+        working-directory: package/boot/uboot-airoha/files/httpd/test
+        run: |
+          npm install --no-audit --no-fund
+          npm test
+
+      - name: gen.py Sync(补丁里嵌的页面是不是 page.html)
+        run: |
+          set -eu
+          python3 - <<'PY'
+          # io.open 而不是 Path.read_text(newline=)：后者要 Python 3.13，
+          # runner 上是 3.12
+          import difflib, io, os, pathlib, re, subprocess, sys, tempfile
+
+          pkg   = pathlib.Path(os.environ["PKG"])
+          patch = pkg / "patches/202-net-add-httpd-recovery-server.patch"
+          html  = pkg / "files/httpd/page.html"
+          gen   = pkg / "files/httpd/gen.py"
+
+          raw = io.open(patch, encoding="utf-8", newline="").read()
+          if "\r\n" in raw:
+              sys.exit("::error::202 补丁是 CRLF 换行，本检查按 LF 处理")
+          lines = raw.split("\n")
+
+          # net/httpd.c 是整块新文件的一个 hunk，取出来、去掉行首的 '+'
+          try:
+              i = lines.index("+++ b/net/httpd.c")
+          except ValueError:
+              sys.exit("::error::202 补丁里找不到 '+++ b/net/httpd.c'")
+          m = re.fullmatch(r"@@ -0,0 \+1,(\d+) @@", lines[i + 1])
+          if not m:
+              sys.exit("::error::httpd.c 的 hunk 头不是整块新文件：%r" % lines[i + 1])
+          n    = int(m.group(1))
+          body = lines[i + 2:i + 2 + n]
+          off  = [k for k, l in enumerate(body) if not l.startswith("+")]
+          if len(body) != n or off:
+              sys.exit("::error::hunk 头写 %d 行，正文对不上（第 %s 行不是 '+' 开头）"
+                       % (n, off[0] + 1 if off else "?"))
+
+          src = "".join(l[1:] + "\n" for l in body)
+          tmp = pathlib.Path(tempfile.mkdtemp()) / "httpd.c"
+          io.open(tmp, "w", encoding="utf-8", newline="").write(src)
+
+          subprocess.run([sys.executable, str(gen), str(html), str(tmp)], check=True)
+          new = io.open(tmp, encoding="utf-8", newline="").read()
+
+          nl = new.split("\n")
+          if nl[-1] != "":
+              sys.exit("::error::gen.py 产出的 httpd.c 末尾没有换行")
+          nl = nl[:-1]
+
+          out = "\n".join(lines[:i + 1]
+                          + ["@@ -0,0 +1,%d @@" % len(nl)]
+                          + ["+" + l for l in nl]
+                          + lines[i + 2 + n:])
+
+          if out == raw:
+              print("OK：补丁里嵌的页面与 page.html 一致（%d 行）" % n)
+              sys.exit(0)
+
+          d = list(difflib.unified_diff(raw.split("\n"), out.split("\n"),
+                                        "committed", "regenerated", lineterm="", n=2))
+          print("\n".join(d[:400]))
+          if len(d) > 400:
+              print("...（还有 %d 行差异未显示）" % (len(d) - 400))
+          sys.exit("::error::page.html 改了但 202 补丁没重新生成")
+          PY
+
+      - name: Patch Hunks(补丁 @@ 计数校验)
+        run: |
+          set -eu
+          python3 - <<'PY'
+          import io, os, pathlib, re, sys
+
+          pdir  = pathlib.Path(os.environ["PKG"]) / "patches"
+          # 从上游原样搬进来的补丁，换行和格式不归我们管
+          skip  = {"120", "121"}
+          files = sorted(pdir.glob("*.patch"))
+          bad = nh = 0
+          for p in files:
+              if p.name[:3] in skip:
+                  continue
+              lines = io.open(p, encoding="utf-8", errors="surrogateescape",
+                              newline="").read().split("\n")
+              i = 0
+              while i < len(lines):
+                  m = re.match(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@", lines[i])
+                  if not m:
+                      i += 1
+                      continue
+                  nh += 1
+                  want_old = int(m.group(2)) if m.group(2) is not None else 1
+                  want_new = int(m.group(4)) if m.group(4) is not None else 1
+                  old = new = 0
+                  j = i + 1
+                  while j < len(lines):
+                      l = lines[j]
+                      if l.startswith("@@ ") or l.startswith("diff --git "):
+                          break
+                      if l.startswith("--- ") and j + 1 < len(lines) \
+                              and lines[j + 1].startswith("+++ "):
+                          break
+                      if l in ("-- ", "--") and j + 1 < len(lines) \
+                              and re.match(r"^\d+(\.\d+)+", lines[j + 1]):
+                          break
+                      if l.startswith("\\"):        # \ No newline at end of file
+                          j += 1
+                          continue
+                      c = l[:1]
+                      if c == "+":
+                          new += 1
+                      elif c == "-":
+                          old += 1
+                      elif c == " ":
+                          old += 1
+                          new += 1
+                      elif l == "":                 # 空行 = 空的上下文行
+                          if j == len(lines) - 1:
+                              break
+                          old += 1
+                          new += 1
+                      else:
+                          break
+                      j += 1
+                  if (old, new) != (want_old, want_new):
+                      bad += 1
+                      print("::error file=%s/%s,line=%d::hunk 头写 -%d,+%d，"
+                            "正文数出来 -%d,+%d"
+                            % (pdir, p.name, i + 1, want_old, want_new, old, new))
+                  i = j
+          print("扫了 %d 个补丁 %d 个 hunk，坏 %d 个" % (len(files), nh, bad))
+          sys.exit(1 if bad else 0)
+          PY
+
+  compile:
+    name: 交叉编译 ${{ matrix.label }}
+    needs: page
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: XG-040G-MD (AN7581)
+            config: an7581_nokia_xg-040g-md
+          - label: XG-040G-MF (AN7583)
+            config: an7583_nokia_xg-040g-mf
+    steps:
+      - name: Checkout(检出)
+        uses: actions/checkout@v4
+
+      - name: Read Makefile(读 PKG_VERSION / PKG_HASH)
+        id: ver
+        run: |
+          set -eu
+          V=$(sed -n 's/^PKG_VERSION:=//p' "$PKG/Makefile")
+          H=$(sed -n 's/^PKG_HASH:=//p' "$PKG/Makefile")
+          test -n "$V" && test -n "$H"
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "hash=$H"    >> "$GITHUB_OUTPUT"
+          echo "U-Boot $V  sha256 $H"
+
+      # include/u-boot.mk 的默认源：u-boot-$(PKG_VERSION).tar.bz2，35 MB 上下
+      - name: Cache Tarball(缓存源码包)
+        uses: actions/cache@v4
+        with:
+          path: ~/dl
+          key: uboot-src-${{ steps.ver.outputs.hash }}
+
+      - name: Fetch U-Boot(下载并校验源码包)
+        env:
+          UBOOT_VERSION: ${{ steps.ver.outputs.version }}
+          UBOOT_HASH: ${{ steps.ver.outputs.hash }}
+        run: |
+          set -eu
+          TAR="$HOME/dl/u-boot-$UBOOT_VERSION.tar.bz2"
+          mkdir -p "$HOME/dl"
+          if [ ! -f "$TAR" ]; then
+            for URL in "https://mirror.cyberbits.eu/u-boot" "https://ftp.denx.de/pub/u-boot"; do
+              echo "从 $URL 取"
+              curl -fsSL --retry 3 --retry-delay 5 -o "$TAR.part" \
+                "$URL/u-boot-$UBOOT_VERSION.tar.bz2" && mv "$TAR.part" "$TAR" && break
+            done
+          fi
+          test -f "$TAR" || { echo "::error::u-boot-$UBOOT_VERSION.tar.bz2 下载失败"; exit 1; }
+          echo "$UBOOT_HASH  $TAR" | sha256sum -c -
+
+      - name: Install Toolchain(装交叉工具链)
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          set -eu
+          # runner 预装的第三方源（Chrome、Microsoft）跟这里要装的东西没有半点
+          # 关系，但只要它们的索引坏掉，apt-get update 就整个非零退出，在 set -e
+          # 下把这一步打死 —— 补丁都还没解包，两块板的交叉编译直接红。
+          # 2026-09-09 就是这么挂的：dl.google.com 的 Packages.gz 校验不上，重跑
+          # 一次仍旧。所以先把它们挪走。
+          sudo rm -f /etc/apt/sources.list.d/*google* \
+                     /etc/apt/sources.list.d/*microsoft* || true
+          # 而且不让 update 单独决定成败：真缺包的话下一条会报出确切的包名，那
+          # 才是该红的地方。
+          sudo apt-get -qq update \
+            || echo "::warning::apt-get update 有源没取到，继续尝试安装"
+          sudo apt-get -yqq install --no-install-recommends \
+            gcc-aarch64-linux-gnu build-essential bison flex bc \
+            libssl-dev libgnutls28-dev uuid-dev zlib1g-dev \
+            python3-dev python3-setuptools python3-pyelftools swig
+          aarch64-linux-gnu-gcc --version | head -1
+
+      - name: Unpack & Patch(解包并按 quilt 顺序打补丁)
+        env:
+          UBOOT_VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -eu
+          mkdir -p "$RUNNER_TEMP/build"
+          tar -xjf "$HOME/dl/u-boot-$UBOOT_VERSION.tar.bz2" -C "$RUNNER_TEMP/build"
+          UB="$RUNNER_TEMP/build/u-boot-$UBOOT_VERSION"
+          echo "UB=$UB" >> "$GITHUB_ENV"
+          cd "$UB"
+          # OpenWrt 用 quilt 按文件名顺序 -p1 打；这里等价地用 patch(1)
+          for p in "$GITHUB_WORKSPACE/$PKG"/patches/*.patch; do
+            echo "--- $(basename "$p")"
+            patch -p1 --no-backup-if-mismatch -i "$p" \
+              || { echo "::error::$(basename "$p") 打不上"; exit 1; }
+          done
+
+      - name: Configure(defconfig + UBOOT_CUSTOMIZE_CONFIG)
+        env:
+          UBOOT_CFG: ${{ matrix.config }}
+        run: |
+          set -eu
+          cd "$UB"
+          test -f "configs/${UBOOT_CFG}_defconfig" \
+            || { echo "::error::configs/${UBOOT_CFG}_defconfig 不存在"; exit 1; }
+          make CROSS_COMPILE=aarch64-linux-gnu- "${UBOOT_CFG}_defconfig"
+          # 与 package/boot/uboot-airoha/Makefile 的 UBOOT_CUSTOMIZE_CONFIG 一致
+          ./scripts/config --file .config \
+            --disable TOOLS_KWBIMAGE \
+            --disable TOOLS_LIBCRYPTO \
+            --disable TOOLS_MKEFICAPSULE \
+            --enable  SERIAL_RX_BUFFER \
+            --set-val SERIAL_RX_BUFFER_SIZE 256
+          # OpenWrt 那边是 oldconfig（交互），CI 里用等价的非交互 olddefconfig
+          make CROSS_COMPILE=aarch64-linux-gnu- olddefconfig </dev/null
+          sed -i 's/CONFIG_TOOLS_LIBCRYPTO=y/# CONFIG_TOOLS_LIBCRYPTO is not set/' .config
+          # 这一条是本作业存在的理由：CMD_HTTPD 默认 n，靠 950 / 960 打开。
+          # 打不开的话 net/httpd.c 根本不会被编译，整个作业就是空转。
+          grep -qx 'CONFIG_CMD_HTTPD=y' .config \
+            || { echo "::error::.config 里没有 CONFIG_CMD_HTTPD=y —— httpd.c 不会被编译"; exit 1; }
+          # 210 的两个间谍挂在 EVT_SETTINGS_R / EVT_POST_PREBOOT 上，EVENT=n 时
+          # event_notify() 是空操作，升级上来的机器会继续跑存档里指向 TFTP 的
+          # boot_ubi 和 check_buttons —— 编译照样过，救砖入口却没了。
+          grep -qx 'CONFIG_EVENT=y' .config \
+            || { echo "::error::.config 里没有 CONFIG_EVENT=y —— 210 的 env 刷新间谍不会被调用"; exit 1; }
+          grep -E '^CONFIG_(CMD_HTTPD|PROT_TCP|CYCLIC|EVENT|HTTPD_FACTORY_|CONSOLE_RECORD)' .config
+
+      - name: Build(交叉编译)
+        run: |
+          set -eu
+          cd "$UB"
+          make -j"$(nproc)" CROSS_COMPILE=aarch64-linux-gnu- LOCALVERSION="-ci"
+
+      - name: Verify(确认 httpd.o 与镜像都在)
+        run: |
+          set -eu
+          cd "$UB"
+          test -f net/httpd.o || { echo "::error::net/httpd.o 没生成，httpd.c 没被编进去"; exit 1; }
+          test -f u-boot.bin  || { echo "::error::u-boot.bin 没生成"; exit 1; }
+          echo "net/httpd.o  $(stat -c%s net/httpd.o) B"
+          echo "u-boot.bin   $(stat -c%s u-boot.bin) B"
+          aarch64-linux-gnu-size net/httpd.o || true
+
+      # httpd.c 是这个项目自己写的，不该有告警。这一步在两块板上都真过了几轮
+      # 之后才拦：从这里起 httpd.o 出一条告警就红。
+      - name: Warnings(单独用 -Werror 重编 httpd.o)
+        run: |
+          set -eu
+          cd "$UB"
+          rm -f net/httpd.o
+          make -j"$(nproc)" CROSS_COMPILE=aarch64-linux-gnu- KCFLAGS="-Werror" net/httpd.o
+
+      - name: Upload(留一份镜像与 .config)
+        uses: actions/upload-artifact@v4
+        with:
+          name: u-boot-${{ matrix.config }}
+          path: |
+            ${{ env.UB }}/u-boot.bin
+            ${{ env.UB }}/.config
+          if-no-files-found: error
+          retention-days: 7

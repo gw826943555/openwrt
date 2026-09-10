@@ -1,0 +1,11 @@
+{
+  "name": "airoha-web-uboot-page-test",
+  "private": true,
+  "description": "jsdom cases for the U-Boot recovery page (../page.html)",
+  "scripts": {
+    "test": "node page.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}

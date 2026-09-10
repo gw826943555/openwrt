@@ -1,0 +1,59 @@
+From: Loong <1031313955@qq.com>
+Subject: [PATCH] console: carry the pre-relocation record over to the relocated buffer
+
+With CONSOLE_RECORD_INIT_F the console is recorded from before relocation,
+into a small buffer in the early malloc area.  console_record_init() then
+runs a second time from board_init_r() and simply allocates a fresh buffer,
+so everything recorded so far -- the banner, the CPU line, the DRAM size --
+is dropped on the floor.
+
+Copy the early buffer's contents into the new one before recording goes on.
+The early buffer sits in the pre-relocation malloc area, which nothing has
+touched this early in board_init_r().
+
+The web recovery server's GET /log (202) serves this record to a user who
+has no serial adapter; without this hunk the first thing they would see is
+"Core:", with the DRAM size gone.
+
+diff --git a/common/console.c b/common/console.c
+--- a/common/console.c
++++ b/common/console.c
+@@ -835,6 +835,7 @@ void flush(void)
+ #ifdef CONFIG_CONSOLE_RECORD
+ int console_record_init(void)
+ {
++	struct membuf early = *(struct membuf *)&gd->console_out;
+ 	int ret;
+ 
+ 	ret = membuf_new((struct membuf *)&gd->console_out,
+@@ -843,6 +844,30 @@ int console_record_init(void)
+ 				CONFIG_CONSOLE_RECORD_OUT_SIZE_F);
+ 	if (ret)
+ 		return ret;
++
++	/*
++	 * Called a second time after relocation: carry over what the
++	 * pre-relocation buffer holds (the banner, CPU and DRAM lines), so a
++	 * reader of the record sees the boot from the top rather than from
++	 * board_init_r().  The early buffer lives in the pre-relocation
++	 * malloc area, which is still intact this early in board_init_r().
++	 */
++	if ((gd->flags & GD_FLG_RELOC) && early.start) {
++		char *data;
++		int len, i;
++
++		for (i = 0; i < 2; i++) {
++			len = membuf_getraw(&early, -1, true, &data);
++			if (len <= 0)
++				break;
++			membuf_put((struct membuf *)&gd->console_out, data, len);
++		}
++		/*
++		 * An overflow of the early buffer was that buffer's; the
++		 * flag would otherwise tell a reader that this one is full.
++		 */
++		gd->flags &= ~GD_FLG_RECORD_OVF;
++	}
+ 	ret = membuf_new((struct membuf *)&gd->console_in,
+ 			 CONFIG_CONSOLE_RECORD_IN_SIZE);
+ 
