@@ -1,0 +1,144 @@
+From: Loong <1031313955@qq.com>
+Subject: [PATCH] arm: airoha: an7581: probe the real DRAM size
+
+dram_init() took the size straight from the device tree, so U-Boot reported
+whatever the dts happened to say -- and then fdt_fixup_memory_banks() pushed
+that same number into the kernel's dtb, overwriting the /memory node the
+kernel would otherwise have used.  A board fitted with a 1 GiB part but
+carrying the conservative 512 MiB dts ran with half its memory unreachable,
+and no dts edit downstream could fix it, because the fixup always won.
+
+Nothing in the boot chain reports the real size: BL2 brings up the
+controller and moves on.  So probe it by address aliasing -- on a part
+smaller than the address being written, the write wraps around and lands
+back on a low anchor word.
+
+The anchor sits above the ATF reservation at the bottom of DRAM, and both
+words are restored before returning, so this runs safely before relocation.
+The dts value stays as the base address source and as documentation of the
+smallest part the board ships with.
+
+Every step is printed.  The board that ends up with a surprising size is
+exactly the board whose owner has no serial console attached, and dram_init()
+runs early enough that these lines land in the console recording the recovery
+page serves at /log -- so the derivation, not just the answer, is there to
+read afterwards.  A 1 GiB part carrying the 512 MiB dts now says
+
+  dram: probing by address aliasing, base 0x80000000
+  dram:  anchor at 0x80200000, holds 0x00000000
+  dram:   512 MiB: wrote 0xa0200000, anchor now 0x5a5aa5a5 -- no wrap, part is larger
+  dram:  1024 MiB: wrote 0xc0200000, anchor now 0xa5a55a5a -- wrapped onto the anchor
+  dram: 1024 MiB probed, device tree says 512 MiB
+  dram: going with the probe; this is also what fdt_fixup_memory_banks() hands the kernel
+
+Writing it out also exposed a hole worth closing: the loop starts at 512 MiB,
+so on a smaller part every candidate wraps and the probe answers 512 MiB --
+U-Boot would then hand the kernel memory that is not there.  Nothing below
+the floor can be measured this way, so a dts below it is now taken as-is and
+the probe skipped.
+
+Verified against mmap-aliased memory for the 512 MiB, 1 GiB and 2 GiB cases.
+
+--- a/arch/arm/mach-airoha/an7581/init.c
++++ b/arch/arm/mach-airoha/an7581/init.c
+@@ -16,9 +16,99 @@
+ 	return 0;
+ }
+ 
++/*
++ * The device tree carries a conservative size, because one image ships to
++ * boards fitted with different parts and nothing in the boot chain reports
++ * the real one -- BL2 configures the controller and moves on.  Find it by
++ * address aliasing instead: on a part smaller than the address being probed,
++ * a write high up wraps around and lands back on the low anchor.
++ *
++ * The anchor sits above the ATF reservation at the bottom of DRAM, and both
++ * words are put back before returning, so this is safe to run this early.
++ *
++ * Every step is printed.  A board that ends up with the wrong size is
++ * exactly the board whose owner has no serial console attached, and these
++ * lines are early enough to survive into the console recording that the
++ * recovery page serves at /log -- so the derivation, not just the answer,
++ * is there to read afterwards.
++ */
++static ulong an7581_probe_ram_size(ulong base)
++{
++	volatile u32 *lo = (volatile u32 *)(base + SZ_2M);
++	u32 save_lo = *lo;
++	ulong size;
++
++	printf("dram: probing by address aliasing, base 0x%lx\n", base);
++	printf("dram:  anchor at 0x%lx, holds 0x%08x\n", (ulong)lo, save_lo);
++
++	for (size = SZ_512M; size < SZ_2G; size <<= 1) {
++		volatile u32 *hi = (volatile u32 *)((ulong)lo + size);
++		u32 save_hi = *hi;
++		u32 got;
++
++		*lo = 0x5a5aa5a5;
++		*hi = 0xa5a55a5a;
++		__asm__ __volatile__("dsb sy" : : : "memory");
++		got = *lo;
++
++		printf("dram:  %4lu MiB: wrote 0x%lx, anchor now 0x%08x -- %s\n",
++		       size >> 20, (ulong)hi, got,
++		       got == 0x5a5aa5a5 ? "no wrap, part is larger" :
++					   "wrapped onto the anchor");
++
++		if (got != 0x5a5aa5a5) {
++			/* Wrapped, so *hi and *lo are the same word. */
++			*hi = save_hi;
++			*lo = save_lo;
++
++			return size;
++		}
++
++		*hi = save_hi;
++	}
++
++	*lo = save_lo;
++	printf("dram:  nothing wrapped below 2048 MiB\n");
++
++	return SZ_2G;
++}
++
+ int dram_init(void)
+ {
+-	return fdtdec_setup_mem_size_base();
++	ulong dts, probed;
++	int ret;
++
++	ret = fdtdec_setup_mem_size_base();
++	if (ret)
++		return ret;
++
++	dts = gd->ram_size;
++
++	/*
++	 * The loop starts at 512 MiB, so on a smaller part every candidate
++	 * wraps and the answer would be 512 MiB -- U-Boot would then hand the
++	 * kernel memory that is not there.  Nothing below the floor can be
++	 * measured this way, so below it the device tree is the better source.
++	 */
++	if (dts && dts < SZ_512M) {
++		printf("dram: %lu MiB from the device tree; below the 512 MiB probe floor, not probing\n",
++		       dts >> 20);
++
++		return 0;
++	}
++
++	probed = an7581_probe_ram_size(gd->ram_base);
++	gd->ram_size = probed;
++
++	if (probed == dts) {
++		printf("dram: %lu MiB, agrees with the device tree\n", probed >> 20);
++	} else {
++		printf("dram: %lu MiB probed, device tree says %lu MiB\n",
++		       probed >> 20, dts >> 20);
++		printf("dram: going with the probe; this is also what fdt_fixup_memory_banks() hands the kernel\n");
++	}
++
++	return 0;
+ }
+ 
+ int dram_init_banksize(void)
