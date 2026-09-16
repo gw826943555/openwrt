@@ -137,6 +137,9 @@ define Host/Install
 	$(INSTALL_BIN) $(HOST_BUILD_DIR)/spi_nand_flash_table $(STAGING_DIR_HOST)/bin/airoha-atf-gen-flash-table
 endef
 
+define Build/Patch
+endef
+
 define Build/Prepare
 	$(if $(filter bl2,$(ATF_STAGE)),
 		$(eval $(call Download,bl2-toolchain))
@@ -150,6 +153,7 @@ define Build/Prepare
 
 	$(eval $(call Download,atf-airoha))
 	$(TAR) -C $(PKG_BUILD_DIR) --strip-components=1 -xf $(DL_DIR)/$(FILE)
+	$(foreach f,$(wildcard $(PATCH_DIR)/*.patch),patch -p1 -d $(PKG_BUILD_DIR) < $(f) || exit 1;)
 endef
 
 define Build/Compile/bl2
