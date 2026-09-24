@@ -362,7 +362,7 @@ Signed-off-by: pbs05 <27010143+pbs05@users.noreply.github.com>
  #include "airoha_eth.h"
  
  static void airoha_debugfs_ppe_print_tuple(struct seq_file *m,
-@@ -173,9 +173,47 @@ static int airoha_ppe_debugfs_foe_bind_show(struct seq_file *m, void *private)
+@@ -173,9 +173,48 @@ static int airoha_ppe_debugfs_foe_bind_show(struct seq_file *m, void *private)
  }
  DEFINE_SHOW_ATTRIBUTE(airoha_ppe_debugfs_foe_bind);
  
@@ -395,7 +395,8 @@ Signed-off-by: pbs05 <27010143+pbs05@users.noreply.github.com>
 +		seq_printf(m, "ppe%u_table_cfg: %08x\n", i,
 +			   airoha_fe_rr(eth, REG_PPE_TB_CFG(i)));
 +		seq_printf(m, "ppe%u_gdm2_default_cpu_port: %u\n", i,
-+			   FIELD_GET(DFT_CPORT_MASK(AIROHA_GDM2_IDX), cport));
++			   (u32)FIELD_GET(DFT_CPORT_MASK(AIROHA_GDM2_IDX),
++					  cport));
 +	}
 +
 +	return 0;
