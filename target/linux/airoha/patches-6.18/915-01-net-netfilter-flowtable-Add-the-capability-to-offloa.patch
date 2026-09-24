@@ -138,13 +138,17 @@ Signed-off-by: Lorenzo Bianconi <lorenzo@kernel.org>
  static bool nft_flow_offload_skip(struct sk_buff *skb, int family)
  {
  	if (skb_sec_path(skb))
-@@ -129,6 +151,9 @@ static void nft_flow_offload_eval(const
+@@ -157,10 +157,13 @@ static void nft_flow_offload_eval(const
+ 	flow = flow_offload_alloc(ct);
  	if (!flow)
  		goto err_flow_alloc;
  
 +	nft_flow_set_dscp(pkt, flow, dir);
 +	nft_flow_set_dscp(pkt, flow, !dir);
 +
- 	flow_offload_route_init(flow, &route);
+ 	if (routing)
+ 		flow_offload_route_init(flow, &route);
+ 	else
+ 		if (flow_offload_bridge_init(flow, pkt, dir, priv->flowtable) < 0)
+ 			goto err_flow_add;
  	if (tcph)
- 		flow_offload_ct_tcp(ct);
